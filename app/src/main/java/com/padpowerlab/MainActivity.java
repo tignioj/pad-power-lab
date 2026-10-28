@@ -48,6 +48,10 @@ public final class MainActivity extends Activity {
     private PowerChart chart;
     private TextView badge, elapsedText, notice, wattsText, powerDetail, tempText, batteryText, fpsText, thermalText, gpuInfo, sessionText;
     private TextView threadsLabel, dutyLabel, gpuLabel, brightnessLabel;
+    private TextView inputVoltsText, inputAmpsText, inputWattsText, protocolText, chargeStatusText;
+    private Button rootButton;
+    private RootChargeMonitor charge;
+    private boolean restoreRoot;
     private SeekBar threadsBar, dutyBar, gpuBar, brightnessBar;
     private Spinner resolutionSpinner, frameSpinner, durationSpinner, cutoffSpinner;
     private Button startButton, exportButton;
@@ -91,8 +95,16 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         power=(PowerManager)getSystemService(POWER_SERVICE);
+        charge=new RootChargeMonitor(()->handler.post(()->{
+            if(!isDestroyed() && inputVoltsText!=null){
+                updateChargeReadings();
+                boolean persist=charge.enabled && charge.everSucceeded;
+                if(restoreRoot!=persist){restoreRoot=persist;saveSettings();}
+            }
+        }));
         loadSettings();
         buildUi();
+        charge.setEnabled(restoreRoot);
         power.addThermalStatusListener(getMainExecutor(),thermalListener);
     }
     private int dp(float v) { return Math.round(v*getResources().getDisplayMetrics().density); }
@@ -161,8 +173,20 @@ public final class MainActivity extends Activity {
         body.addView(scroll(controls),new LinearLayout.LayoutParams(dp(322),-1));
         View gutter=new View(this); body.addView(gutter,new LinearLayout.LayoutParams(dp(16),1));
         LinearLayout readings=column();
+        LinearLayout chargeCard=card();
+        LinearLayout chargeHead=row();
+        chargeHead.addView(text("02   充电器输入",14,INK),new LinearLayout.LayoutParams(0,-2,1));
+        rootButton=button("启用 Root 监测",false);rootButton.setTextSize(11);
+        chargeHead.addView(rootButton,new LinearLayout.LayoutParams(dp(126),dp(34)));chargeCard.addView(chargeHead);
+        rootButton.setOnClickListener(v->charge.setEnabled(!charge.enabled));
+        gap(chargeCard,10);LinearLayout input=row();
+        inputVoltsText=metric(input,"输入电压 / V");inputAmpsText=metric(input,"输入电流 / A");
+        inputWattsText=metric(input,"输入功率 / W");protocolText=metric(input,"驱动识别协议");
+        inputVoltsText.setTextSize(23);inputAmpsText.setTextSize(23);inputWattsText.setTextSize(23);inputWattsText.setTextColor(LIME);
+        chargeCard.addView(input);gap(chargeCard,10);
+        chargeStatusText=text("需 Root 授权 · 仅读取充电驱动",10,MUTED);chargeCard.addView(chargeStatusText);addCard(readings,chargeCard);
         LinearLayout powerCard=card();
-        LinearLayout powerHead=row(); powerHead.addView(text("02   实时遥测",14,INK),new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout powerHead=row(); powerHead.addView(text("03   电池与负载遥测",14,INK),new LinearLayout.LayoutParams(0,-2,1));
         elapsedText=text("00:00",13,MUTED); mono(elapsedText); powerHead.addView(elapsedText); powerCard.addView(powerHead); gap(powerCard,10);
         LinearLayout hero=row();
         LinearLayout watts=column(); TextView powerLabel=text("电池净功率 / W   ⓘ 电流方向",12,MUTED); watts.addView(powerLabel); gap(watts,4);
@@ -175,17 +199,17 @@ public final class MainActivity extends Activity {
         batteryText=metric(metrics,"电量"); tempText=metric(metrics,"电池温度"); fpsText=metric(metrics,"渲染帧率"); thermalText=metric(metrics,"温控状态"); powerCard.addView(metrics);
         addCard(readings,powerCard);
         LinearLayout renderCard=card();
-        LinearLayout renderHead=row(); renderHead.addView(text("03   GPU 负载画面",13,INK),new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout renderHead=row(); renderHead.addView(text("04   GPU 负载画面",13,INK),new LinearLayout.LayoutParams(0,-2,1));
         gpuInfo=text("OpenGL ES 3.0",10,MUTED); renderHead.addView(gpuInfo); renderCard.addView(renderHead); gap(renderCard,10);
         gpu=new GpuLoadView(this); renderCard.addView(gpu,new LinearLayout.LayoutParams(-1,dp(142)));
         addCard(readings,renderCard);
         LinearLayout chartCard=card();
-        LinearLayout chartHead=row(); chartHead.addView(text("04   电池净功率趋势",13,INK),new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout chartHead=row(); chartHead.addView(text("05   电池净功率趋势",13,INK),new LinearLayout.LayoutParams(0,-2,1));
         chartHead.addView(text("＋充入   /   −放出",10,LIME)); chartCard.addView(chartHead); gap(chartCard,8);
         chart=new PowerChart(this); chartCard.addView(chart,new LinearLayout.LayoutParams(-1,dp(82)));
         sessionText=text("每秒采样 · 测试时自动记录",10,MUTED); gap(chartCard,7); chartCard.addView(sessionText); addCard(readings,chartCard);
         notice=text(stopReason,12,LIME); readings.addView(notice); gap(readings,7);
-        TextView note=text("电池侧估算功率，不能代表充电器输入或整机耗电；充电输入请看 USB 功率表。部分固件电流符号相反，可点「电流方向」校准。电量接近 100% 时充电功率会降低。",10,MUTED);
+        TextView note=text("输入功率由 USB 驱动的实时电压 × 电流计算；协议按驱动识别结果显示，外接功率表可用于校验。电池净功率是另一侧的读数。电量接近 100% 时充电功率会降低。",10,MUTED);
         note.setLineSpacing(dp(3),1); readings.addView(note);
         body.addView(scroll(readings),new LinearLayout.LayoutParams(0,-1,1));
         root.addView(body,new LinearLayout.LayoutParams(-1,0,1)); setContentView(root);
@@ -276,7 +300,7 @@ public final class MainActivity extends Activity {
             File folder=new File(getFilesDir(),"sessions"); if(!folder.exists()&&!folder.mkdirs())throw new java.io.IOException("无法创建记录目录");
             sessionFile=new File(folder,"PowerLab_"+new SimpleDateFormat("yyyyMMdd_HHmmss_SSS",Locale.US).format(new Date())+".csv");
             writer=new BufferedWriter(new OutputStreamWriter(new FileOutputStream(sessionFile),StandardCharsets.UTF_8));
-            writer.write("timestamp_unix_ms,elapsed_s,event,cpu_threads,cpu_duty_percent,gpu_iterations,gpu_width,gpu_height,target_fps,render_fps,brightness_percent,battery_percent,battery_temp_c,battery_mv,battery_raw_ua,battery_net_w,current_sign_multiplier,plugged,charge_status,thermal_status\n");writer.flush();
+            writer.write("timestamp_unix_ms,elapsed_s,event,cpu_threads,cpu_duty_percent,gpu_iterations,gpu_width,gpu_height,target_fps,render_fps,brightness_percent,battery_percent,battery_temp_c,battery_mv,battery_raw_ua,battery_net_w,current_sign_multiplier,plugged,charge_status,thermal_status,usb_input_voltage_v,usb_input_current_a,usb_input_power_w,charging_protocol,usb_supply_type,usb_sample_timestamp_ms,usb_sample_age_ms,root_charge_status\n");writer.flush();
         }catch(Exception e){sessionFile=null;logError="记录创建失败："+e.getMessage();}
         startTime=SystemClock.elapsedRealtime();lastElapsed=0;sumWatts=0;peakAbsWatts=0;validSamples=0;rows=0;chart.clear();
         running=true;stopReason="测试进行中 · 每秒记录一次";cpu.start(cpuThreads,cpuDuty);gpuChanged();applyWindowLoad();
@@ -302,6 +326,7 @@ public final class MainActivity extends Activity {
     private String duration(long millis) { long s=millis/1000;return String.format(Locale.US,"%02d:%02d",s/60,s%60); }
     private void updateReadings() {
         if(wattsText==null)return;
+        updateChargeReadings();
         wattsText.setText(Double.isFinite(data.watts)?String.format(Locale.US,"%+.2f",data.watts):"—");
         String current=data.currentSupported?String.format(Locale.US,"%+.0f mA",data.microamps/1000f):"电流不支持";
         powerDetail.setText(data.charging()+"\n"+String.format(Locale.US,"%.3f V  ·  原始 %s",data.millivolts/1000f,current)+"\n＋充入 / −供电 · "+(data.currentSign==1?"标准符号":"已反转符号"));
@@ -316,6 +341,24 @@ public final class MainActivity extends Activity {
         sessionText.setText(summary);
         notice.setText(logError!=null?logError:stopReason);notice.setTextColor(logError!=null||(!running&&!stopReason.startsWith("准备"))?AMBER:LIME);
     }
+    private void updateChargeReadings() {
+        long now=SystemClock.elapsedRealtime();ChargeReading r=charge.fresh(now);
+        // The public battery broadcast can detect a disconnect before the next root sample.
+        boolean connected=r!=null && r.online && data.plugged!=0;
+        inputVoltsText.setText(connected && Double.isFinite(r.volts)?String.format(Locale.US,"%.2f",r.volts):"—");
+        inputAmpsText.setText(connected && Double.isFinite(r.amps)?String.format(Locale.US,"%.3f",r.amps):"—");
+        inputWattsText.setText(connected && Double.isFinite(r.watts)?String.format(Locale.US,"%.2f",r.watts):"—");
+        protocolText.setText(connected?r.protocolLabel():r!=null&&!r.online?"未连接":"—");
+        rootButton.setText(charge.enabled?"关闭 Root 监测":"启用 Root 监测");
+        String status=charge.csvStatus(now);
+        if("disabled".equals(status))chargeStatusText.setText("需 Root 授权 · 仅读取充电驱动，不修改充电设置");
+        else if("awaiting_permission".equals(status))chargeStatusText.setText("等待 Magisk / Root 授权，请在弹窗中允许；30 秒超时");
+        else if("unavailable".equals(status))chargeStatusText.setText("未获 Root 授权或此设备驱动不可读，可点按钮重试");
+        else if("stale".equals(status))chargeStatusText.setText("采样超过 4 秒未更新，已隐藏旧读数");
+        else if(!connected)chargeStatusText.setText("Root 已连接 · 当前无 USB 充电输入");
+        else chargeStatusText.setText("Root 实时采样 · "+(now-r.elapsedMillis)+" ms 前 · 驱动 "+r.protocol+" / "+r.usbType);
+    }
+    private static String decimal(double value) {return Double.isFinite(value)?String.format(Locale.US,"%.6f",value):"";}
     private void writeSample() { writeRow("sample");rows++; }
     private void writeRow(String event) {
         if(writer==null)return;
@@ -323,8 +366,12 @@ public final class MainActivity extends Activity {
             String amps=data.currentSupported?Integer.toString(data.microamps):"";
             String watts=Double.isFinite(data.watts)?String.format(Locale.US,"%.6f",data.watts):"";
             String temp=Float.isFinite(data.temperature)?String.format(Locale.US,"%.1f",data.temperature):"";
-            writer.write(String.format(Locale.US,"%d,%.3f,%s,%d,%d,%d,%d,%d,%d,%.2f,%d,%d,%s,%d,%s,%s,%d,%d,%d,%d\n",
-                System.currentTimeMillis(),lastElapsed/1000.0,event,cpuThreads,cpuDuty,gpuSteps,gpu.targetWidth,gpu.targetHeight,gpu.frameLimit,gpu.fps,brightness,data.level,temp,data.millivolts,amps,watts,data.currentSign,data.plugged,data.status,data.thermal));writer.flush();
+            writer.write(String.format(Locale.US,"%d,%.3f,%s,%d,%d,%d,%d,%d,%d,%.2f,%d,%d,%s,%d,%s,%s,%d,%d,%d,%d",
+                System.currentTimeMillis(),lastElapsed/1000.0,event,cpuThreads,cpuDuty,gpuSteps,gpu.targetWidth,gpu.targetHeight,gpu.frameLimit,gpu.fps,brightness,data.level,temp,data.millivolts,amps,watts,data.currentSign,data.plugged,data.status,data.thermal));
+            long now=SystemClock.elapsedRealtime();ChargeReading r=charge.fresh(now);
+            boolean connected=r!=null && r.online && data.plugged!=0;
+            writer.write(","+(connected?decimal(r.volts):"")+","+(connected?decimal(r.amps):"")+","+(connected?decimal(r.watts):"")
+                +","+(connected?r.protocol:"")+","+(connected?r.usbType:"")+","+(r!=null?r.timestampMillis:"")+","+(r!=null?now-r.elapsedMillis:"")+","+charge.csvStatus(now)+"\n");writer.flush();
         } catch(Exception e){logError="数据记录失败："+e.getMessage();closeLog();}
     }
     private void closeLog() { if(writer!=null){try{writer.close();}catch(Exception ignored){}writer=null;} }
@@ -350,20 +397,22 @@ public final class MainActivity extends Activity {
         cpuThreads=Math.min(maxThreads,p.getInt("threads",Math.min(4,maxThreads)));cpuDuty=p.getInt("duty",70);gpuSteps=p.getInt("gpu",48);brightness=p.getInt("brightness",80);
         resolutionIndex=p.getInt("resolution",1);frameIndex=p.getInt("frame",0);durationIndex=p.getInt("duration",1);cutoffIndex=p.getInt("cutoff",0);
         data.currentSign=p.getInt("currentSign",1);
+        restoreRoot=p.getBoolean("rootCharge",false);
         String last=p.getString("lastFile",null);if(last!=null){File f=new File(getFilesDir(),"sessions/"+last);if(f.isFile())sessionFile=f;}
     }
     private void saveSettings() {
         android.content.SharedPreferences.Editor e=getPreferences(MODE_PRIVATE).edit().putInt("threads",cpuThreads).putInt("duty",cpuDuty).putInt("gpu",gpuSteps).putInt("brightness",brightness)
-            .putInt("resolution",resolutionIndex).putInt("frame",frameIndex).putInt("duration",durationIndex).putInt("cutoff",cutoffIndex).putInt("currentSign",data.currentSign);
+            .putInt("resolution",resolutionIndex).putInt("frame",frameIndex).putInt("duration",durationIndex).putInt("cutoff",cutoffIndex).putInt("currentSign",data.currentSign)
+            .putBoolean("rootCharge",charge.enabled && charge.everSucceeded);
         if(sessionFile!=null)e.putString("lastFile",sessionFile.getName());e.apply();
     }
     @Override protected void onResume() {
-        super.onResume();resumed=true;gpu.onResume();
+        super.onResume();resumed=true;gpu.onResume();charge.setForeground(true);
         boolean available=sessionFile!=null&&sessionFile.exists();exportButton.setEnabled(available);exportButton.setAlpha(available?1:.45f);
         handler.removeCallbacks(tick);handler.post(tick);
     }
     @Override protected void onPause() {
-        resumed=false;handler.removeCallbacks(tick);if(running)stopTest("应用离开前台，已自动停止");cpu.stop();gpu.setActive(false);gpu.onPause();restoreWindow();saveSettings();super.onPause();
+        resumed=false;handler.removeCallbacks(tick);charge.setForeground(false);if(running)stopTest("应用离开前台，已自动停止");cpu.stop();gpu.setActive(false);gpu.onPause();restoreWindow();saveSettings();super.onPause();
     }
-    @Override protected void onDestroy() {handler.removeCallbacksAndMessages(null);cpu.stop();closeLog();power.removeThermalStatusListener(thermalListener);super.onDestroy();}
+    @Override protected void onDestroy() {charge.close();handler.removeCallbacksAndMessages(null);cpu.stop();closeLog();power.removeThermalStatusListener(thermalListener);super.onDestroy();}
 }

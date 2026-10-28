@@ -22,7 +22,7 @@ sed 's/<manifest /<manifest package="com.padpowerlab" /' app/src/main/AndroidMan
 "$BT/aapt2" compile --dir app/src/main/res -o build/compiled-res
 find build/compiled-res -name '*.flat' -print0 | xargs -0 "$BT/aapt2" link -I "$ANDROID_JAR" \
     --manifest build/AndroidManifest.xml --java build/generated --debug-mode \
-    --min-sdk-version 29 --target-sdk-version 35 --version-code 1 --version-name 1.0 \
+    --min-sdk-version 29 --target-sdk-version 35 --version-code 2 --version-name 1.1 \
     -o build/resources.apk
 find app/src/main/java build/generated -name '*.java' > build/sources.list
 javac -encoding UTF-8 --release 8 -Xlint:-options -classpath "$ANDROID_JAR" \

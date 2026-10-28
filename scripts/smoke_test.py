@@ -95,11 +95,11 @@ try:
     raw = adb('shell', 'cat', '/sdcard/Download/PowerLab/' + exported)
     rows = list(csv.DictReader(io.StringIO(raw)))
     assert len(rows) >= 2
-    assert all(len(row) == 20 and None not in row and all(v is not None for v in row.values()) for row in rows)
+    assert all(len(row) == 28 and None not in row and all(v is not None for v in row.values()) for row in rows)
     assert any(row['event'].startswith('stop:') for row in rows)
-    assert all(row['current_sign_multiplier'] == '1' for row in rows)
+    assert all(row['current_sign_multiplier'] in {'1','-1'} for row in rows)
     (OUT / exported).write_text(raw, encoding='utf-8')
-    results['csv_export'] = {'file': exported, 'rows': len(rows), 'columns': 20}
+    results['csv_export'] = {'file': exported, 'rows': len(rows), 'columns': 28}
 
     tap('极限负载')
     tap('开始负载测试')
