@@ -1,0 +1,10 @@
+.tools/
+build/
+local.properties
+.gradle/
+*.keystore
+*.jks
+captures/
+__pycache__/
+*.py[cod]
+.DS_Store
